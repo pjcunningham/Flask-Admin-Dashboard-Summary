@@ -96,7 +96,7 @@ Line 75, override the view's ```render(self, template, **kwargs)``` method:
 
 Note the conditional check on the template as we're not concerned with the Edit/Create rendering and the injection of a ```summary_data``` dictionary into the method's ```**kwargs``` argument.
 
-Note the helper methods to provide the actual summary data at lines 66 and 71, these need to be adjusted as neccesary:
+Note the helper methods to provide the actual summary data at lines 66 and 71, these need to be adjusted as necessary:
 
     def page_cost(self, current_page):
         # this should take into account any filters/search inplace
