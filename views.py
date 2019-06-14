@@ -7,6 +7,7 @@ from flask_security import current_user
 from flask_admin.contrib import sqla
 from flask_admin import BaseView, expose
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 from models import Project
 
 
@@ -61,26 +62,82 @@ class ProjectView(MyModelView):
     # don't call the custom page list.html as you'll get a recursive call
     list_template = 'admin/model/summary_list.html'
     form_columns = ('name', 'cost')
+    column_filters = ['cost']
     page_size = 10
+    column_searchable_list = ['name']
 
-    def page_cost(self, current_page):
-        # this should take into account any filters/search inplace
-        _query = self.session.query(Project).limit(self.page_size).offset(current_page * self.page_size)
-        return sum([p.cost for p in _query])
+    def page_cost(self, data):
+        return sum([p.cost for p in data])
 
-    def total_cost(self):
-        # this should take into account any filters/search inplace
-        return self.session.query(func.sum(Project.cost)).scalar()
+    def total_cost(self, search, filters):
+
+        # Our summary query
+        query = self.session.query(func.sum(Project.cost))
+
+        # apply search and filters, taken verbatim from
+        # https://github.com/flask-admin/flask-admin/blob/master/flask_admin/contrib/sqla/view.py#L1005
+
+        joins = {}
+        count_joins = {}
+
+        count_query = self.get_count_query() if not self.simple_list_pager else None
+
+        # Ignore eager-loaded relations (prevent unnecessary joins)
+        # TODO: Separate join detection for query and count query?
+        if hasattr(query, '_join_entities'):
+            for entity in query._join_entities:
+                for table in entity.tables:
+                    joins[table] = None
+
+        # Apply search criteria
+        if self._search_supported and search:
+            query, count_query, joins, count_joins = self._apply_search(query,
+                                                                        count_query,
+                                                                        joins,
+                                                                        count_joins,
+                                                                        search)
+
+        # Apply filters
+        if filters and self._filters:
+            query, count_query, joins, count_joins = self._apply_filters(query,
+                                                                         count_query,
+                                                                         joins,
+                                                                         count_joins,
+                                                                         filters)
+
+        # Auto join
+        for j in self._auto_joins:
+            query = query.options(joinedload(j))
+
+        # run our summary query
+
+        return query.scalar()
 
     def render(self, template, **kwargs):
         # we are only interested in the summary_list page
         if template == 'admin/model/summary_list.html':
+
+            # _data are the models in the page list, this has already had the search and filters taken into account
+            _data = kwargs['data']
+
+            # the following kwarg items are needs to run the grand_total including the any applied search and filtering
+            _search = kwargs['search']
+            _active_filters = kwargs['active_filters']
+
             # append a summary_data dictionary into kwargs
             # The title attribute value appears in the actions column
             # all other attributes correspond to their respective Flask-Admin 'column_list' definition
-            _current_page = kwargs['page']
+
             kwargs['summary_data'] = [
-                {'title': 'Page Total', 'name': None, 'cost': self.page_cost(_current_page)},
-                {'title': 'Grand Total', 'name': None, 'cost': self.total_cost()},
+                {
+                    'title': 'Page Total',
+                    'name': None,
+                    'cost': self.page_cost(_data)
+                },
+                {
+                    'title': 'Grand Total',
+                    'name': None,
+                    'cost': self.total_cost(_search, _active_filters)
+                },
             ]
         return super(ProjectView, self).render(template, **kwargs)
